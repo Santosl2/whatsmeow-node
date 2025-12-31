@@ -85,12 +85,13 @@ export async function downloadPrebuilt() {
 
     const out = path.join(__dirname, '..', 'build', `whatsmeow.${ext}`)
     try {
+        console.log(`[whatsmeow-node] Downloading prebuilt from ${url}...`)
         await downloadTo(url, out)
-        console.log(`[whatsmeow-node] Downloaded prebuilt from ${url}`)
+        console.log(`[whatsmeow-node] Successfully downloaded prebuilt to ${out}`)
         return true
     } catch (err) {
         console.warn(
-            `[whatsmeow-node] No remote prebuilt found at ${url}:`,
+            `[whatsmeow-node] Failed to download prebuilt from ${url}:`,
             err?.message || String(err)
         )
         return false

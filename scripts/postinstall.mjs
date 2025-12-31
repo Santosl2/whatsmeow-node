@@ -31,6 +31,12 @@ async function run() {
     const { triplet, ext } = detectPlatform()
     const buildOut = path.join(__dirname, '..', 'build', `whatsmeow.${ext}`)
 
+    // 0) Check if build output already exists (e.g., from a previous build)
+    if (fs.existsSync(buildOut)) {
+        console.log(`[whatsmeow-node] Native library already exists at ${buildOut}`)
+        return
+    }
+
     // 1) Prefer local prebuilt shipped in npm tarball (no network)
     const prebuiltDir = path.join(__dirname, '..', 'prebuilt', triplet)
     const prebuilt = path.join(prebuiltDir, `whatsmeow.${ext}`)
