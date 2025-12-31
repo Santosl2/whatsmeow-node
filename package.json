@@ -24,8 +24,7 @@
     "dependencies": {
         "ioredis": "^5.8.2",
         "koffi": "^2.9.0",
-        "protobufjs": "^7.5.4",
-        "tsc": "^2.0.4"
+        "protobufjs": "^7.5.4"
     },
     "devDependencies": {
         "@types/node": "^22.5.4",
