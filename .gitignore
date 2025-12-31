@@ -1,5 +1,7 @@
-dist/
-build/
+
+
+!*/
+!.gitkeep
 node_modules/
 *.log
 *.tgz

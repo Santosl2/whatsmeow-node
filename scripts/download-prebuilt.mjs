@@ -57,7 +57,8 @@ function httpGet(url) {
 }
 
 async function downloadTo(url, dstPath) {
-    await fsp.mkdir(path.dirname(dstPath), { recursive: true })
+    const dir = path.dirname(dstPath)
+    await fsp.mkdir(dir, { recursive: true })
     const tmp = `${dstPath}.download`
     try {
         await fsp.unlink(tmp)
@@ -70,6 +71,8 @@ async function downloadTo(url, dstPath) {
         out.on('error', reject)
         out.on('finish', resolve)
     })
+    // Ensure directory exists before rename (in case of race conditions)
+    await fsp.mkdir(dir, { recursive: true })
     await fsp.rename(tmp, dstPath)
 }
 
