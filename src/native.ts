@@ -45,7 +45,11 @@ const fns = {
     WmClientWaitForConnection: mk('str', 'WmClientWaitForConnection', ['str']),
     WmRelease: mk('str', 'WmRelease', ['str']),
     WmClientCall: mk('str', 'WmClientCall', ['str']),
-    WmFreeCString: mk('void', 'WmFreeCString', ['char*'])
+    WmFreeCString: mk('void', 'WmFreeCString', ['char*']),
+    // Redis functions
+    WmRedisConnect: mk('str', 'WmRedisConnect', ['str']),
+    WmRedisDisconnect: mk('str', 'WmRedisDisconnect', ['str']),
+    WmRedisSetQueueKey: mk('str', 'WmRedisSetQueueKey', ['str'])
 } as const
 
 function call<T>(fn: keyof typeof fns | string, payload: any): T {
@@ -144,5 +148,11 @@ export const native = {
         call<{ ok: boolean }>('WmClientWaitForConnection', { client, timeoutMs }),
     clientCall: (client: number, method: string, args: any) =>
         call<any>('WmClientCall', { client, method, args }),
-    release: (handle: number) => call<{}>('WmRelease', { handle })
+    release: (handle: number) => call<{}>('WmRelease', { handle }),
+    // Redis functions
+    redisConnect: (opts: { addr: string; password?: string; db?: number; queueKey?: string }) =>
+        call<{ connected: boolean; queueKey: string }>('WmRedisConnect', opts),
+    redisDisconnect: () => call<{ disconnected: boolean }>('WmRedisDisconnect', {}),
+    redisSetQueueKey: (queueKey: string) =>
+        call<{ queueKey: string }>('WmRedisSetQueueKey', { queueKey })
 }

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/redis/go-redis/v9"
 	wa "go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -28,8 +29,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type handle uint64
@@ -44,14 +45,124 @@ type logOptions struct {
 }
 
 func init() {
-    // Enable Postgres array support by wiring the wrapper expected by whatsmeow's sqlstore
-    sqlstore.PostgresArrayWrapper = pq.Array
+	// Enable Postgres array support by wiring the wrapper expected by whatsmeow's sqlstore
+	sqlstore.PostgresArrayWrapper = pq.Array
 }
 
 var (
 	logCfg   = logOptions{Database: "DEBUG", Client: "DEBUG", Color: true}
 	logCfgMu sync.RWMutex
 )
+
+// --- Redis configuration ---
+var (
+	redisClient   *redis.Client
+	redisMu       sync.RWMutex
+	redisQueueKey string = "whatsmeow:messages"
+)
+
+type redisConfig struct {
+	Addr     string `json:"addr"`     // e.g. "localhost:6379"
+	Password string `json:"password"` // optional
+	DB       int    `json:"db"`       // optional, defaults to 0
+	QueueKey string `json:"queueKey"` // optional, defaults to "whatsmeow:messages"
+	Username string `json:"username"` // optional
+}
+
+//export WmRedisConnect
+func WmRedisConnect(input *C.char) *C.char {
+	var cfg redisConfig
+	if err := json.Unmarshal([]byte(C.GoString(input)), &cfg); err != nil {
+		return fail(fmt.Errorf("invalid json: %w", err))
+	}
+	if cfg.Addr == "" {
+		return fail(errors.New("addr is required"))
+	}
+	if cfg.QueueKey != "" {
+		redisQueueKey = cfg.QueueKey
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Addr,
+		Username: cfg.Username,
+		Password: cfg.Password,
+		DB:       cfg.DB,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return fail(fmt.Errorf("redis connection failed: %w", err))
+	}
+
+	redisMu.Lock()
+	if redisClient != nil {
+		_ = redisClient.Close()
+	}
+	redisClient = rdb
+	redisMu.Unlock()
+
+	return success(map[string]any{"connected": true, "queueKey": redisQueueKey})
+}
+
+//export WmRedisDisconnect
+func WmRedisDisconnect(input *C.char) *C.char {
+	redisMu.Lock()
+	defer redisMu.Unlock()
+	if redisClient != nil {
+		_ = redisClient.Close()
+		redisClient = nil
+	}
+	return success(map[string]any{"disconnected": true})
+}
+
+//export WmRedisSetQueueKey
+func WmRedisSetQueueKey(input *C.char) *C.char {
+	var payload struct {
+		QueueKey string `json:"queueKey"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(input)), &payload); err != nil {
+		return fail(fmt.Errorf("invalid json: %w", err))
+	}
+	if payload.QueueKey == "" {
+		return fail(errors.New("queueKey is required"))
+	}
+	redisMu.Lock()
+	redisQueueKey = payload.QueueKey
+	redisMu.Unlock()
+	return success(map[string]any{"queueKey": payload.QueueKey})
+}
+
+// publishToRedis sends a message event to the Redis queue
+func publishToRedis(clientJID string, eventData map[string]any) {
+	redisMu.RLock()
+	rdb := redisClient
+	queueKey := redisQueueKey
+	redisMu.RUnlock()
+
+	if rdb == nil {
+		return
+	}
+
+	// Add client JID to the event data
+	payload := map[string]any{
+		"clientJid": clientJID,
+		"event":     eventData,
+		"timestamp": time.Now().UnixMilli(),
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Use LPUSH for queue (consumer uses BRPOP/RPOP)
+	rdb.Publish(ctx, queueKey, string(data))
+}
 
 func makeLogger(module, level string, color bool) waLog.Logger {
 	if strings.EqualFold(level, "none") {
@@ -119,20 +230,20 @@ func WmClientIsLoggedIn(input *C.char) *C.char {
 
 //export WmClientHasStoreID
 func WmClientHasStoreID(input *C.char) *C.char {
-    var payload struct {
-        Client uint64 `json:"client"`
-    }
-    if err := json.Unmarshal([]byte(C.GoString(input)), &payload); err != nil {
-        return fail(fmt.Errorf("invalid json: %w", err))
-    }
-    clientsMu.RLock()
-    cli := clients[handle(payload.Client)]
-    clientsMu.RUnlock()
-    if cli == nil {
-        return fail(errors.New("client handle not found"))
-    }
-    has := !cli.Store.GetJID().IsEmpty()
-    return success(map[string]any{"has": has})
+	var payload struct {
+		Client uint64 `json:"client"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(input)), &payload); err != nil {
+		return fail(fmt.Errorf("invalid json: %w", err))
+	}
+	clientsMu.RLock()
+	cli := clients[handle(payload.Client)]
+	clientsMu.RUnlock()
+	if cli == nil {
+		return fail(errors.New("client handle not found"))
+	}
+	has := !cli.Store.GetJID().IsEmpty()
+	return success(map[string]any{"has": has})
 }
 
 //export WmClientDisconnect
@@ -486,11 +597,39 @@ func WmClientStartEvents(input *C.char) *C.char {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &eventStream{ch: make(chan map[string]any, 128), ctx: ctx, cancel: cancel, client: cli}
+
+	// Get the client JID for Redis publishing
+	clientJID := ""
+	if cli.Store != nil {
+		jid := cli.Store.GetJID()
+		if !jid.IsEmpty() {
+			clientJID = jid.String()
+		}
+	}
+
 	stream.handlerID = cli.AddEventHandler(func(raw interface{}) {
 		if raw == nil {
 			return
 		}
 		payload := serializeEvent(raw)
+
+		// Publish message events to Redis queue
+		if eventType, ok := payload["type"].(string); ok {
+			// Only publish relevant message events to Redis
+			switch eventType {
+			case "message", "fb_message", "receipt", "presence", "chat_presence":
+				// Get updated JID if not set yet (after pairing)
+				jid := clientJID
+				if jid == "" && cli.Store != nil {
+					storeJID := cli.Store.GetJID()
+					if !storeJID.IsEmpty() {
+						jid = storeJID.String()
+					}
+				}
+				go publishToRedis(jid, payload)
+			}
+		}
+
 		select {
 		case stream.ch <- payload:
 		default: /* drop if full */
