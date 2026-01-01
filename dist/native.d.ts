@@ -78,4 +78,12 @@ export declare const native: {
     redisSetQueueKey: (queueKey: string) => {
         queueKey: string;
     };
+    clientEnableAutoRedis: (client: number) => {
+        enabled: boolean;
+        already_enabled?: boolean;
+    };
+    clientDisableAutoRedis: (client: number) => {
+        disabled: boolean;
+        was_enabled: boolean;
+    };
 };

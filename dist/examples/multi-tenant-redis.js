@@ -3,7 +3,7 @@
  *
  * This example shows how to:
  * 1. Connect multiple WhatsApp clients
- * 2. Publish all incoming messages to a Redis queue
+ * 2. Automatically publish all incoming messages to a Redis queue (no loop required!)
  * 3. Consume messages from the queue in your backend
  *
  * Run: npx tsx examples/multi-tenant-redis.ts
@@ -15,7 +15,7 @@ const REDIS_PASSWORD = process.env.REDIS_PASSWORD || '';
 const REDIS_QUEUE_KEY = process.env.REDIS_QUEUE_KEY || 'whatsmeow:messages';
 const DB_PATH = process.env.DB_PATH || './whatsmeow.db';
 async function main() {
-    console.log('🚀 Starting multi-tenant WhatsApp bridge with Redis...', process.env);
+    console.log('🚀 Starting multi-tenant WhatsApp bridge with Redis...');
     // 1. Connect to Redis first
     console.log(`📡 Connecting to Redis at ${REDIS_ADDR}...`);
     const redisResult = redisConnect({
@@ -34,6 +34,7 @@ async function main() {
     // 3. Get all existing devices or create first one
     const devices = await container.getAllDevices();
     console.log(`📱 Found ${devices.length} existing device(s)`);
+    const clients = [];
     if (devices.length === 0) {
         // Create first device and show QR
         console.log('📲 No devices found. Creating new device...');
@@ -67,27 +68,12 @@ async function main() {
         const connected = await client.waitForConnection(30000);
         if (connected) {
             console.log('✅ Connected to WhatsApp!');
-            console.log(`📤 All incoming messages will be published to Redis queue: ${REDIS_QUEUE_KEY}`);
-        }
-        // Start listening for events (triggers Redis publishing)
-        console.log('\n💡 Listening for messages... Press Ctrl+C to stop\n');
-        process.on('SIGINT', async () => {
-            console.log('\n👋 Shutting down...');
-            await client.disconnect();
-            redisDisconnect();
-            process.exit(0);
-        });
-        // Listen for events (they are also published to Redis automatically)
-        for await (const event of client.events()) {
-            if (event.type === 'message') {
-                console.log(`📨 Message received and published to Redis`);
-            }
+            clients.push(client);
         }
     }
     else {
         // Connect all existing devices
         console.log('📲 Connecting existing devices...');
-        const clients = [];
         for (const device of devices) {
             const client = await Client.create(device);
             await client.connect();
@@ -101,26 +87,28 @@ async function main() {
                 console.log(`⚠️ Client failed to connect within timeout`);
             }
         }
-        console.log(`\n📤 All incoming messages from ${clients.length} client(s) will be published to Redis queue: ${REDIS_QUEUE_KEY}`);
-        console.log('💡 Listening for messages... Press Ctrl+C to stop\n');
-        process.on('SIGINT', async () => {
-            console.log('\n👋 Shutting down...');
-            for (const client of clients) {
-                await client.disconnect();
-            }
-            redisDisconnect();
-            process.exit(0);
-        });
-        // Listen for events from all clients
-        // await Promise.all(
-        //     clients.map(async (client) => {
-        //         for await (const event of client.events()) {
-        //             if (event.type === 'message') {
-        //                 console.log(`📨 Message received and published to Redis`)
-        //             }
-        //         }
-        //     })
-        // )
     }
+    // 4. Enable auto Redis publishing for all clients
+    // Messages will be automatically published to Redis without needing an event loop!
+    for (const client of clients) {
+        await client.enableAutoRedis();
+    }
+    console.log(`\n📤 Auto Redis publishing enabled for ${clients.length} client(s)`);
+    console.log(`📨 All incoming messages will be automatically published to: ${REDIS_QUEUE_KEY}`);
+    console.log('💡 No event loop required - messages are published in the background!');
+    console.log('\n⏳ Press Ctrl+C to stop\n');
+    // Handle graceful shutdown
+    process.on('SIGINT', async () => {
+        console.log('\n👋 Shutting down...');
+        for (const client of clients) {
+            await client.disableAutoRedis();
+            await client.disconnect();
+        }
+        redisDisconnect();
+        process.exit(0);
+    });
+    // Keep the process alive - no event loop needed!
+    // The Go bridge handles everything in the background
+    await new Promise(() => { });
 }
 main().catch(console.error);

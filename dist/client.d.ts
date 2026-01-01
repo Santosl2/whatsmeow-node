@@ -50,6 +50,26 @@ export declare class Client {
     }): Promise<Buffer>;
     getGroupInviteLink(jid: JID, reset?: boolean): Promise<string>;
     disconnect(): Promise<void>;
+    /**
+     * Enable automatic publishing of events to Redis.
+     * When enabled, message events are automatically published to Redis
+     * without needing to consume events via the events() loop.
+     *
+     * @returns Object indicating if auto-publish was enabled
+     */
+    enableAutoRedis(): Promise<{
+        enabled: boolean;
+        alreadyEnabled?: boolean;
+    }>;
+    /**
+     * Disable automatic publishing of events to Redis.
+     *
+     * @returns Object indicating if auto-publish was disabled
+     */
+    disableAutoRedis(): Promise<{
+        disabled: boolean;
+        wasEnabled: boolean;
+    }>;
     events(timeoutMs?: number): AsyncIterable<ClientEvent>;
 }
 export declare function openContainer(opts: OpenContainerOptions): Promise<Container>;

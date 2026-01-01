@@ -98,6 +98,15 @@ extern char* WmClientDisconnect(char* input);
 extern char* WmClientWaitForConnection(char* input);
 extern char* WmClientStartEvents(char* input);
 extern char* WmEventNext(char* input);
+
+// WmClientEnableAutoRedis enables automatic publishing of events to Redis
+// This doesn't require consuming events via the JS loop - events are published automatically
+//
+extern char* WmClientEnableAutoRedis(char* input);
+
+// WmClientDisableAutoRedis disables automatic publishing of events to Redis
+//
+extern char* WmClientDisableAutoRedis(char* input);
 extern void WmFreeCString(char* ptr);
 extern char* WmOpenContainer(char* input);
 extern char* WmContainerGetFirstDevice(char* input);

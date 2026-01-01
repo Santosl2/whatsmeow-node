@@ -689,6 +689,10 @@ var (
 
 	eventsMu  sync.RWMutex
 	eventsMap = map[handle]*eventStream{}
+
+	// Auto-publish handlers registry (client handle -> handler ID)
+	autoPublishMu       sync.RWMutex
+	autoPublishHandlers = map[handle]uint32{}
 )
 
 type qrState struct {
@@ -719,6 +723,102 @@ func fail(err error) *C.char {
 	msg := err.Error()
 	b, _ := json.Marshal(jsonResp{Ok: false, Error: msg})
 	return C.CString(string(b))
+}
+
+// WmClientEnableAutoRedis enables automatic publishing of events to Redis
+// This doesn't require consuming events via the JS loop - events are published automatically
+//
+//export WmClientEnableAutoRedis
+func WmClientEnableAutoRedis(input *C.char) *C.char {
+	var payload struct {
+		Client uint64 `json:"client"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(input)), &payload); err != nil {
+		return fail(fmt.Errorf("invalid json: %w", err))
+	}
+
+	clientsMu.RLock()
+	cli := clients[handle(payload.Client)]
+	clientsMu.RUnlock()
+	if cli == nil {
+		return fail(errors.New("client handle not found"))
+	}
+
+	// Check if already enabled
+	autoPublishMu.RLock()
+	_, exists := autoPublishHandlers[handle(payload.Client)]
+	autoPublishMu.RUnlock()
+	if exists {
+		return success(map[string]any{"enabled": true, "already_enabled": true})
+	}
+
+	// Get client JID for Redis publishing
+	clientJID := ""
+	if cli.Store != nil {
+		jid := cli.Store.GetJID()
+		if !jid.IsEmpty() {
+			clientJID = jid.String()
+		}
+	}
+
+	// Add event handler that publishes to Redis automatically
+	handlerID := cli.AddEventHandler(func(raw interface{}) {
+		if raw == nil {
+			return
+		}
+		payload := serializeEvent(raw)
+
+		// Publish relevant events to Redis
+		if eventType, ok := payload["type"].(string); ok {
+			switch eventType {
+			case "message", "fb_message", "receipt", "presence", "chat_presence":
+				// Get updated JID if not set yet (after pairing)
+				jid := clientJID
+				if jid == "" && cli.Store != nil {
+					storeJID := cli.Store.GetJID()
+					if !storeJID.IsEmpty() {
+						jid = storeJID.String()
+					}
+				}
+				go publishToRedis(jid, payload)
+			}
+		}
+	})
+
+	autoPublishMu.Lock()
+	autoPublishHandlers[handle(payload.Client)] = handlerID
+	autoPublishMu.Unlock()
+
+	return success(map[string]any{"enabled": true})
+}
+
+// WmClientDisableAutoRedis disables automatic publishing of events to Redis
+//
+//export WmClientDisableAutoRedis
+func WmClientDisableAutoRedis(input *C.char) *C.char {
+	var payload struct {
+		Client uint64 `json:"client"`
+	}
+	if err := json.Unmarshal([]byte(C.GoString(input)), &payload); err != nil {
+		return fail(fmt.Errorf("invalid json: %w", err))
+	}
+
+	clientsMu.RLock()
+	cli := clients[handle(payload.Client)]
+	clientsMu.RUnlock()
+	if cli == nil {
+		return fail(errors.New("client handle not found"))
+	}
+
+	autoPublishMu.Lock()
+	handlerID, exists := autoPublishHandlers[handle(payload.Client)]
+	if exists {
+		cli.RemoveEventHandler(handlerID)
+		delete(autoPublishHandlers, handle(payload.Client))
+	}
+	autoPublishMu.Unlock()
+
+	return success(map[string]any{"disabled": true, "was_enabled": exists})
 }
 
 //export WmFreeCString

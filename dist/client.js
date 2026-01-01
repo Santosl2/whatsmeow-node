@@ -107,6 +107,26 @@ export class Client {
     async disconnect() {
         native.clientDisconnect(this.handle);
     }
+    /**
+     * Enable automatic publishing of events to Redis.
+     * When enabled, message events are automatically published to Redis
+     * without needing to consume events via the events() loop.
+     *
+     * @returns Object indicating if auto-publish was enabled
+     */
+    async enableAutoRedis() {
+        const result = native.clientEnableAutoRedis(this.handle);
+        return { enabled: result.enabled, alreadyEnabled: result.already_enabled };
+    }
+    /**
+     * Disable automatic publishing of events to Redis.
+     *
+     * @returns Object indicating if auto-publish was disabled
+     */
+    async disableAutoRedis() {
+        const result = native.clientDisableAutoRedis(this.handle);
+        return { disabled: result.disabled, wasEnabled: result.was_enabled };
+    }
     events(timeoutMs = 60000) {
         const self = this;
         return {

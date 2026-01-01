@@ -154,5 +154,10 @@ export const native = {
         call<{ connected: boolean; queueKey: string }>('WmRedisConnect', opts),
     redisDisconnect: () => call<{ disconnected: boolean }>('WmRedisDisconnect', {}),
     redisSetQueueKey: (queueKey: string) =>
-        call<{ queueKey: string }>('WmRedisSetQueueKey', { queueKey })
+        call<{ queueKey: string }>('WmRedisSetQueueKey', { queueKey }),
+    // Auto Redis publish (no event loop required)
+    clientEnableAutoRedis: (client: number) =>
+        call<{ enabled: boolean; already_enabled?: boolean }>('WmClientEnableAutoRedis', { client }),
+    clientDisableAutoRedis: (client: number) =>
+        call<{ disabled: boolean; was_enabled: boolean }>('WmClientDisableAutoRedis', { client })
 }

@@ -115,5 +115,8 @@ export const native = {
     // Redis functions
     redisConnect: (opts) => call('WmRedisConnect', opts),
     redisDisconnect: () => call('WmRedisDisconnect', {}),
-    redisSetQueueKey: (queueKey) => call('WmRedisSetQueueKey', { queueKey })
+    redisSetQueueKey: (queueKey) => call('WmRedisSetQueueKey', { queueKey }),
+    // Auto Redis publish (no event loop required)
+    clientEnableAutoRedis: (client) => call('WmClientEnableAutoRedis', { client }),
+    clientDisableAutoRedis: (client) => call('WmClientDisableAutoRedis', { client })
 };
