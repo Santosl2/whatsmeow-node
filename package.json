@@ -8,7 +8,6 @@
     "types": "dist/index.d.ts",
     "repository": "https://github.com/vinikjkkj/whatsmeow-node",
     "files": [
-        "src",
         "dist",
         "prebuilt",
         "proto",
